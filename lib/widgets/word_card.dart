@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/word_model.dart';
+import '../services/tts_service.dart';
 
-/// بطاقة تعرض كلمة واحدة من كلمات الدرس.
-///
-/// بدلاً من صور خارجية (غير مسموح بها)، تُستخدم دائرة بسيطة (Avatar)
-/// تعرض الحرف الأول من الكلمة كـ"أيقونة" بصرية بديلة — مما يفي بمتطلب
-/// "simple icon placeholder (no external images required)".
+/// بطاقة تعرض كلمة واحدة من كلمات الدرس، مع زر نطق (🔊) لسماع
+/// الكلمة الإنجليزية بصوت حقيقي عبر [TtsService].
 class WordCard extends StatelessWidget {
   const WordCard({super.key, required this.word});
 
@@ -34,6 +32,11 @@ class WordCard extends StatelessWidget {
           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(word.meaningAr, textDirection: TextDirection.rtl),
+        trailing: IconButton(
+          icon: const Icon(Icons.volume_up_rounded),
+          tooltip: 'Listen',
+          onPressed: () => TtsService.instance.speak(word.text),
+        ),
       ),
     );
   }
