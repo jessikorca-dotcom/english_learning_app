@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback, SystemSound, SystemSoundType;
 import '../models/letter_model.dart';
 import '../models/word_model.dart';
 import '../services/content_service.dart';
@@ -14,6 +15,10 @@ import '../widgets/word_card.dart';
 /// تعرض الحرف بصيغتيه الكبيرة والصغيرة، وكلماته الثلاث، ثم اختبار
 /// قصير (اختيار من متعدد) لكل كلمة. عند إنهاء الاختبار يُسجَّل الدرس
 /// كمكتمل وتُضاف نقاط الخبرة عبر [ProgressService].
+///
+/// يتضمن مؤثرات صوتية وحركية (اهتزاز + نقرة صوتية + رجّة/نبضة بصرية)
+/// عند الإجابة، باستخدام واجهات Flutter المدمجة فقط (بدون أي حزمة
+/// خارجية) لتفادي أي تأثير على حجم أو استقرار البناء.
 class LessonDetailScreen extends StatefulWidget {
   const LessonDetailScreen({super.key, required this.letter});
 
@@ -23,7 +28,8 @@ class LessonDetailScreen extends StatefulWidget {
   State<LessonDetailScreen> createState() => _LessonDetailScreenState();
 }
 
-class _LessonDetailScreenState extends State<LessonDetailScreen> {
+class _LessonDetailScreenState extends State<LessonDetailScreen>
+    with SingleTickerProviderStateMixin {
   bool _quizStarted = false;
   bool _quizFinished = false;
 
@@ -37,10 +43,24 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
 
   List<String> _allMeaningsPool = [];
 
+  // متحكم "الرجّة" (Shake) عند الإجابة الخاطئة — يهتز الاختيارات أفقياً
+  // بشكل متلاشٍ (decaying oscillation) دون الحاجة لأي حزمة أنيميشن خارجية.
+  late final AnimationController _shakeController;
+
   @override
   void initState() {
     super.initState();
     _loadDistractorPool();
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+  }
+
+  @override
+  void dispose() {
+    _shakeController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDistractorPool() async {
@@ -90,6 +110,14 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
       if (isCorrect) _correctCount++;
     });
 
+    if (isCorrect) {
+      HapticFeedback.lightImpact();
+      SystemSound.play(SystemSoundType.click);
+    } else {
+      HapticFeedback.vibrate();
+      _shakeController.forward(from: 0);
+    }
+
     Future.delayed(const Duration(milliseconds: 700), _goToNextQuestion);
   }
 
@@ -113,6 +141,7 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
   Future<void> _finishQuiz() async {
     await ProgressService.instance.completeLesson(widget.letter.letter);
     if (!mounted) return;
+    HapticFeedback.mediumImpact(); // نبضة احتفالية خفيفة عند إنهاء الدرس
     setState(() => _quizFinished = true);
   }
 
@@ -204,37 +233,57 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
           style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 32),
-        ...options.map((option) {
-          final isSelected = option == _selectedOption;
-          final isCorrectAnswer = option == word.meaningAr;
 
-          Color? bg;
-          Color? fg;
-          if (_selectedOption != null) {
-            if (isCorrectAnswer) {
-              // إظهار الإجابة الصحيحة دائماً باللون الأخضر بعد الاختيار
-              bg = Colors.green.withOpacity(0.15);
-              fg = Colors.green.shade700;
-            } else if (isSelected && !_isSelectedCorrect!) {
-              bg = Colors.red.withOpacity(0.15);
-              fg = Colors.red.shade700;
-            }
-          }
+        // AnimatedBuilder يطبّق "رجّة" أفقية متلاشية على كل الاختيارات
+        // عند الإجابة الخاطئة فقط (القيمة تبقى صفراً في باقي الأحيان).
+        AnimatedBuilder(
+          animation: _shakeController,
+          builder: (context, child) {
+            final t = _shakeController.value;
+            final offset = sin(t * pi * 6) * (1 - t) * 8;
+            return Transform.translate(offset: Offset(offset, 0), child: child);
+          },
+          child: Column(
+            children: options.map((option) {
+              final isSelected = option == _selectedOption;
+              final isCorrectAnswer = option == word.meaningAr;
 
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: OutlinedButton(
-              onPressed: () => _selectAnswer(option),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: bg,
-                foregroundColor: fg,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: BorderSide(color: fg ?? theme.colorScheme.outline),
-              ),
-              child: Text(option, textDirection: TextDirection.rtl),
-            ),
-          );
-        }),
+              Color? bg;
+              Color? fg;
+              if (_selectedOption != null) {
+                if (isCorrectAnswer) {
+                  bg = Colors.green.withOpacity(0.15);
+                  fg = Colors.green.shade700;
+                } else if (isSelected && !_isSelectedCorrect!) {
+                  bg = Colors.red.withOpacity(0.15);
+                  fg = Colors.red.shade700;
+                }
+              }
+
+              // نبضة تكبير بسيطة للإجابة الصحيحة بعد أن يختار المستخدم أي إجابة
+              final shouldPulse = _selectedOption != null && isCorrectAnswer;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: AnimatedScale(
+                  scale: shouldPulse ? 1.04 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: OutlinedButton(
+                    onPressed: () => _selectAnswer(option),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: bg,
+                      foregroundColor: fg,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: BorderSide(color: fg ?? theme.colorScheme.outline),
+                    ),
+                    child: Text(option, textDirection: TextDirection.rtl),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
       ],
     );
   }
