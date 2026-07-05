@@ -6,8 +6,7 @@ class AppConstants {
 
   // App identity
   static const String appName = 'English Learning App';
-  static const String developerName = 'Hosam Al-Sharaei';
-
+  static const String developerName = 'عاصم المهرم & حسام الشراعي';
   // SharedPreferences keys
   static const String prefXp = 'pref_xp';
   static const String prefLevel = 'pref_level';
